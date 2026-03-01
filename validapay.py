@@ -8,7 +8,7 @@ from PIL import Image
 from openpyxl.styles import PatternFill
 
 # Configuration de l'IA (Utilisez votre clé ici)
-genai.configure(api_key="AIzaSyBVkgBBlGm9bzu2WKjg7EeP1yVg3x_iTds")
+genai.configure(api_key="AIzaSyBPKhHv2FPoWVyEcSQV7YRnJW0qQBMaikY")
 model = genai.GenerativeModel('models/gemini-2.0-flash')
 
 # Configuration de la page
