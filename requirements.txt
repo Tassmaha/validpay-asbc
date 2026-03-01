@@ -1,0 +1,13 @@
+streamlit
+pandas
+openpyxl
+google-generativeai
+folium
+streamlit-folium
+Pillow 
+
+
+
+
+
+#python -m streamlit run validapay.py
