@@ -128,7 +128,7 @@ if ref_file and pay_file:
             eco_totale = nb_total_rejets * montant_indemnite
 
             # Affichage des indicateurs en colonnes
-            st.subheader("📊 Bilan de la Validation")
+            st.subheader("📊 Résultats de la validation")
             res = st.columns(5)
             res[0].metric("✅ Valides", f"{nb_valides}")
             res[1].metric("❌ Absents", f"{nb_absents}")
@@ -141,7 +141,7 @@ if ref_file and pay_file:
                 st.info(f"💡 **Impact budgétaire :** Cette validation permet d'économiser **{eco_totale:,.0f} FCFA**.")
 
             # Tableau des erreurs
-            st.subheader("📋 Détail des anomalies")
+            st.subheader("📋 Détail des incohérences")
             anomalies = df_pay[df_pay['Statut_ValidaPay'] != 'Valide'].drop(columns=['CLE_UNIQUE'], errors='ignore')
             if not anomalies.empty:
                 st.dataframe(anomalies, use_container_width=True)
@@ -153,7 +153,7 @@ if ref_file and pay_file:
             col_geo = next((c for c in df_pay.columns if any(x in c.lower() for x in ['district', 'ds', 'région', 'province'])), None)
             
             if col_geo:
-                st.subheader(f"📊 Répartition des anomalies par {col_geo}")
+                st.subheader(f"📊 Répartition des incohérences par {col_geo}")
                 df_erreurs_graph = df_pay[df_pay['Statut_ValidaPay'] != 'Valide']
                 
                 if not df_erreurs_graph.empty:
@@ -198,9 +198,9 @@ if ref_file and pay_file:
             # Boutons
             exp1, exp2 = st.columns(2)
             with exp1:
-                st.download_button(label="📥 Télécharger le Rapport Coloré", data=buffer_complet.getvalue(), file_name="Rapport_ValidPay_Colore.xlsx")
+                st.download_button(label="📥 Télécharger le Rapport global avec les incohérences", data=buffer_complet.getvalue(), file_name="Rapport_ValidPay_Colore.xlsx")
             with exp2:
-                st.download_button(label="📥 Télécharger la liste des Valides", data=buffer_valides.getvalue(), file_name="Liste_ASBC_Valides.xlsx")
+                st.download_button(label="📥 Télécharger la liste des ASBC validés", data=buffer_valides.getvalue(), file_name="Liste_ASBC_Valides.xlsx")
                 
         else:
             st.error("Les colonnes clés sélectionnées ne correspondent pas dans la base de référence.")
@@ -209,7 +209,7 @@ if ref_file and pay_file:
 
 # --- SECTION CHATBOT ASSISTANT IA ---
 st.divider()
-st.header("🔬 Assistant IA Analyste")
+st.header("🔬 Assistant IA")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
