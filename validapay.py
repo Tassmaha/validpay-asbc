@@ -51,8 +51,8 @@ with col2:
     pay_file = st.file_uploader("Liste à valider (Excel)", type=['xlsx'], key="pay")
 
 if ref_file and pay_file:
-    df_ref = pd.read_excel(ref_file, engine='openpyxl').astype(str)
-    df_ref = pd.read_excel(pay_file, engine='openpyxl').astype(str)
+    df_ref = pd.read_excel(ref_file, engine='calamine').astype(str)
+    df_ref = pd.read_excel(pay_file, engine='calamine').astype(str)
     st.success("Fichiers chargés avec succès !")
     
     st.header("🔍 Configuration")  
