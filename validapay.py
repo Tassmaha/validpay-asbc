@@ -52,10 +52,11 @@ with col2:
 
 if ref_file and pay_file:
     df_ref = pd.read_excel(ref_file, engine='calamine').astype(str)
-    df_ref = pd.read_excel(pay_file, engine='calamine').astype(str)
+    df_pay = pd.read_excel(pay_file, engine='calamine').astype(str)
     st.success("Fichiers chargés avec succès !")
     
-    st.header("🔍 Configuration")  
+    st.header("🔍 Configuration") 
+    colonnes_pay = df_pay.columns.tolist()
     
     # --- AJOUT DU MONTANT DE L'INDEMNITÉ ---
     c_fin1, c_fin2 = st.columns([1, 2])
