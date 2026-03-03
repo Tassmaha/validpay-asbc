@@ -52,7 +52,7 @@ with col2:
 
 if ref_file and pay_file:
     df_ref = pd.read_excel(ref_file, engine='openpyxl').astype(str)
-    df_ref = pd.read_excel(ref_file, engine='openpyxl').astype(str)
+    df_ref = pd.read_excel(pay_file, engine='openpyxl').astype(str)
     st.success("Fichiers chargés avec succès !")
     
     st.header("🔍 Configuration")  
