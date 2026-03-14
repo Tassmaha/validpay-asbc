@@ -75,12 +75,15 @@ if ref_file and pay_file:
     colonnes_pay = df_pay.columns.tolist()
     
     c_a, c_b, c_c = st.columns(3)
+    c_a, c_b, c_c, c_d = st.columns(4)
     with c_a:
         cols_cles = st.multiselect("Colonnes clés ID (ex: Nom, Prénom) :", colonnes_pay)
     with c_b:
         cols_doublons = st.multiselect("Colonnes pour les doublons :", colonnes_pay)
     with c_c:
         col_tel = st.selectbox("Colonne Téléphone :", ["Aucune"] + colonnes_pay)
+    with c_d:
+        col_village = st.selectbox("Colonne Village :", ["Aucune"] + colonnes_pay)
 
     if cols_cles:
         # Création de la clé unique
@@ -127,6 +130,15 @@ if ref_file and pay_file:
                     mask_doublon = df_pay.duplicated(subset=cols_doublons, keep=False)
                     df_pay.loc[mask_doublon, 'Statut_ValidaPay'] = 'Doublon'
 
+                # 4. Vérification du quota par village (max 2 ASBC)
+                if col_village != "Aucune":
+                    serie_village = df_pay[col_village].astype(str).str.strip()
+                    mask_village_valide = serie_village != ""
+                    comptes_village = serie_village[mask_village_valide].value_counts()
+                    villages_satures = comptes_village[comptes_village > 2].index
+                    mask_sur_effectif = serie_village.isin(villages_satures)
+                    df_pay.loc[mask_sur_effectif, 'Statut_ValidaPay'] = 'Quota Village Dépassé'
+
             # Validation initiale
             executer_validation()
 
@@ -134,7 +146,7 @@ if ref_file and pay_file:
             st.subheader("🛠️ Correction assistée")
             st.caption("Aperçu des corrections proposées (normalisation texte et nettoyage téléphone) avant recalcul des statuts.")
 
-            colonnes_texte = sorted(set(cols_cles + cols_doublons))
+            colonnes_texte = sorted(set(cols_cles + cols_doublons + ([col_village] if col_village != "Aucune" else [])))
             df_preview = df_pay.copy()
             journal_corrections = []
 
@@ -201,7 +213,8 @@ if ref_file and pay_file:
             else:
                 df_journal = pd.DataFrame()
                 st.success("Aucune correction automatique suggérée.")
-                
+
+
             # 2. Marquage des Absents (Prioritaire sur le format tel)
             mask_absent = ~df_pay['CLE_UNIQUE'].isin(df_ref['CLE_UNIQUE'])
             df_pay.loc[mask_absent, 'Statut_ValidaPay'] = 'Absent'
@@ -218,6 +231,7 @@ if ref_file and pay_file:
             nb_valides = len(df_pay[df_pay['Statut_ValidaPay'] == 'Valide'])
             nb_absents = len(df_pay[df_pay['Statut_ValidaPay'] == 'Absent'])
             nb_doublons = len(df_pay[df_pay['Statut_ValidaPay'] == 'Doublon'])
+            nb_village = len(df_pay[df_pay['Statut_ValidaPay'] == 'Quota Village Dépassé'])
             nb_tel = len(df_pay[df_pay['Statut_ValidaPay'] == 'Erreur Format Tel'])
             
             # Calcul financier
@@ -227,11 +241,15 @@ if ref_file and pay_file:
             # Affichage des indicateurs en colonnes
             st.subheader("📊 Résultats de la validation")
             res = st.columns(5)
+            res = st.columns(6)
             res[0].metric("✅ Valides", f"{nb_valides}")
             res[1].metric("❌ Absents", f"{nb_absents}")
             res[2].metric("👯 Doublons", f"{nb_doublons}")
             res[3].metric("📞 Erreurs Tel", f"{nb_tel}")
             res[4].metric("💰 Économie (FCFA)", f"{eco_totale:,.0f}")
+            res[3].metric("🏘️ Quota Village", f"{nb_village}")
+            res[4].metric("📞 Erreurs Tel", f"{nb_tel}")
+            res[5].metric("💰 Économie (FCFA)", f"{eco_totale:,.0f}")
 
             # Message d'alerte si des erreurs existent
             if eco_totale > 0:
@@ -257,22 +275,7 @@ if ref_file and pay_file:
                     chart_data = df_erreurs_graph.groupby(col_geo).size().reset_index(name='Nombre de rejets')
                     chart_data = chart_data.sort_values(by='Nombre de rejets', ascending=False)
                     st.bar_chart(data=chart_data, x=col_geo, y='Nombre de rejets', color="#FF4B4B")
-                    st.caption(f"Zones où les erreurs de saisie, les doublons ou les absences sont les plus élevés.")
-                else:
-                    st.success("Aucune erreur à afficher sur le graphique !")
-            
-           
-            # --- GÉNÉRATION DES EXPORTS ---
-            st.divider()
-            st.subheader("📥 Exportation des fichiers")
-            
-            # 1. Rapport Coloré
-            buffer_complet = io.BytesIO()
-            with pd.ExcelWriter(buffer_complet, engine='openpyxl') as writer:
-                df_export = df_pay.drop(columns=['CLE_UNIQUE'])
-                df_export.to_excel(writer, index=False, sheet_name='Validation')
-                worksheet = writer.sheets['Validation']
-                
+@@ -180,50 +260,60 @@ if ref_file and pay_file:
                 vert_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
                 rouge_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
                 
@@ -298,7 +301,7 @@ if ref_file and pay_file:
                 st.download_button(label="📥 Télécharger le Rapport global avec les incohérences", data=buffer_complet.getvalue(), file_name="Rapport_ValidPay_Colore.xlsx")
             with exp2:
                 st.download_button(label="📥 Télécharger la liste des ASBC validés", data=buffer_valides.getvalue(), file_name="Liste_ASBC_Valides.xlsx")
-               
+
             if 'df_journal' in locals() and not df_journal.empty:
                 buffer_journal = io.BytesIO()
                 with pd.ExcelWriter(buffer_journal, engine='openpyxl') as writer:
@@ -307,7 +310,8 @@ if ref_file and pay_file:
                     label="📥 Télécharger le journal des corrections",
                     data=buffer_journal.getvalue(),
                     file_name="Journal_Corrections_ValidPay.xlsx"
-                ) 
+                )
+                
         else:
             st.error("Les colonnes clés sélectionnées ne correspondent pas dans la base de référence.")
     else:
@@ -332,21 +336,5 @@ if prompt := st.chat_input("Ex: Quel est le taux de rejet par district ?"):
     if 'df_pay' in locals() and 'Statut_ValidaPay' in df_pay.columns:
         total_a = len(df_pay)
         stats_a = df_pay['Statut_ValidaPay'].value_counts().to_dict()
-        taux_e = (1 - (stats_a.get('Valide', 0) / total_a)) * 100 if total_a > 0 else 0
-        
-        contexte = f"""
-        Tu es l'analyste expert de la Direction de la Santé Communautaire au Burkina Faso.
-        DONNÉES : Total agents: {total_a}, Répartition: {stats_a}, Taux anomalies: {taux_e:.1f}%.
-        Réponds de façon professionnelle et donne une recommandation stratégique.
-        """
-    else:
-        contexte = "L'analyse n'est pas encore lancée."
 
-    with st.chat_message("assistant"):
-        try:
-            full_p = f"{contexte}\n\nQuestion : {prompt}"
-            response = model.generate_content(full_p)
-            st.markdown(response.text)
-            st.session_state.messages.append({"role": "assistant", "content": response.text})
-        except Exception as e:
-            st.error(f"Erreur IA : {str(e)}")
+
