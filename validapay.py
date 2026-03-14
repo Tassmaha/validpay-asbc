@@ -40,6 +40,13 @@ st.markdown(
 
 st.divider()
 
+def normaliser_texte(valeur):
+    return " ".join(str(valeur).strip().upper().split())
+
+
+def nettoyer_telephone(valeur):
+    return "".join(ch for ch in str(valeur) if ch.isdigit())
+
 # 1. Chargement des fichiers
 col1, col2 = st.columns(2)
 with col1:
@@ -89,6 +96,64 @@ if ref_file and pay_file:
             df_pay['Statut_ValidaPay'] = 'Valide'
 
             # 1. Vérification du Téléphone (Format Strict & Alphanumérique)
+            def executer_validation():
+                # Initialisation du Statut
+                df_pay['Statut_ValidaPay'] = 'Valide'
+
+                # 1. Vérification du Téléphone (Format Strict & Alphanumérique)
+                if col_tel != "Aucune":
+                    def valider_format_tel(val):
+                        val_str = str(val).strip()
+                        # Détecte si le contenu n'est pas uniquement numérique (ex: "70aa5522")
+                        if not val_str.isdigit():
+                            return "Alphanumérique"
+                        # Détecte si la longueur est différente de 8
+                        if len(val_str) != 8:
+                            return "Longueur Incorrecte"
+                        return "OK"
+
+                    # Application de la fonction
+                    verif_tel = df_pay[col_tel].apply(valider_format_tel)
+
+                    # Marquage des erreurs de téléphone
+                    df_pay.loc[verif_tel != "OK", 'Statut_ValidaPay'] = 'Erreur Format Tel'
+
+                # 2. Marquage des Absents (Prioritaire sur le format tel)
+                mask_absent = ~df_pay['CLE_UNIQUE'].isin(df_ref['CLE_UNIQUE'])
+                df_pay.loc[mask_absent, 'Statut_ValidaPay'] = 'Absent'
+
+                # 3. Marquage des Doublons (Prioritaire sur le format tel)
+                if cols_doublons:
+                    mask_doublon = df_pay.duplicated(subset=cols_doublons, keep=False)
+                    df_pay.loc[mask_doublon, 'Statut_ValidaPay'] = 'Doublon'
+
+            # Validation initiale
+            executer_validation()
+
+            # --- CORRECTION ASSISTÉE (V1) ---
+            st.subheader("🛠️ Correction assistée")
+            st.caption("Aperçu des corrections proposées (normalisation texte et nettoyage téléphone) avant recalcul des statuts.")
+
+            colonnes_texte = sorted(set(cols_cles + cols_doublons))
+            df_preview = df_pay.copy()
+            journal_corrections = []
+
+            for col in colonnes_texte:
+                if col in df_preview.columns:
+                    serie_avant = df_preview[col].astype(str)
+                    serie_apres = serie_avant.apply(normaliser_texte)
+                    mask_modif = serie_avant != serie_apres
+                    if mask_modif.any():
+                        df_preview.loc[mask_modif, col] = serie_apres[mask_modif]
+                        for idx in df_preview.index[mask_modif]:
+                            journal_corrections.append({
+                                "Ligne": int(idx) + 2,
+                                "Colonne": col,
+                                "Ancienne valeur": serie_avant.loc[idx],
+                                "Nouvelle valeur": serie_apres.loc[idx],
+                                "Type correction": "Normalisation texte"
+                            })
+
             if col_tel != "Aucune":
                 def valider_format_tel(val):
                     val_str = str(val).strip()
@@ -105,7 +170,38 @@ if ref_file and pay_file:
                 
                 # Marquage des erreurs de téléphone
                 df_pay.loc[verif_tel != "OK", 'Statut_ValidaPay'] = 'Erreur Format Tel'
+                serie_tel_avant = df_preview[col_tel].astype(str)
+                serie_tel_nettoyee = serie_tel_avant.apply(nettoyer_telephone)
+                mask_tel = (
+                    (serie_tel_avant != serie_tel_nettoyee)
+                    & (serie_tel_nettoyee.str.len() == 8)
+                    & (serie_tel_nettoyee.str.isdigit())
+                )
+                if mask_tel.any():
+                    df_preview.loc[mask_tel, col_tel] = serie_tel_nettoyee[mask_tel]
+                    for idx in df_preview.index[mask_tel]:
+                        journal_corrections.append({
+                            "Ligne": int(idx) + 2,
+                            "Colonne": col_tel,
+                            "Ancienne valeur": serie_tel_avant.loc[idx],
+                            "Nouvelle valeur": serie_tel_nettoyee.loc[idx],
+                            "Type correction": "Nettoyage téléphone"
+                        })
 
+            if journal_corrections:
+                df_journal = pd.DataFrame(journal_corrections)
+                st.info(f"{len(df_journal)} correction(s) potentielle(s) détectée(s).")
+                st.dataframe(df_journal.head(100), use_container_width=True)
+
+                if st.button("✅ Appliquer les corrections recommandées"):
+                    df_pay = df_preview.copy()
+                    df_pay['CLE_UNIQUE'] = df_pay[cols_cles].agg('-'.join, axis=1)
+                    executer_validation()
+                    st.success("Corrections appliquées et validation recalculée.")
+            else:
+                df_journal = pd.DataFrame()
+                st.success("Aucune correction automatique suggérée.")
+                
             # 2. Marquage des Absents (Prioritaire sur le format tel)
             mask_absent = ~df_pay['CLE_UNIQUE'].isin(df_ref['CLE_UNIQUE'])
             df_pay.loc[mask_absent, 'Statut_ValidaPay'] = 'Absent'
@@ -202,7 +298,16 @@ if ref_file and pay_file:
                 st.download_button(label="📥 Télécharger le Rapport global avec les incohérences", data=buffer_complet.getvalue(), file_name="Rapport_ValidPay_Colore.xlsx")
             with exp2:
                 st.download_button(label="📥 Télécharger la liste des ASBC validés", data=buffer_valides.getvalue(), file_name="Liste_ASBC_Valides.xlsx")
-                
+               
+            if 'df_journal' in locals() and not df_journal.empty:
+                buffer_journal = io.BytesIO()
+                with pd.ExcelWriter(buffer_journal, engine='openpyxl') as writer:
+                    df_journal.to_excel(writer, index=False, sheet_name='Journal corrections')
+                st.download_button(
+                    label="📥 Télécharger le journal des corrections",
+                    data=buffer_journal.getvalue(),
+                    file_name="Journal_Corrections_ValidPay.xlsx"
+                ) 
         else:
             st.error("Les colonnes clés sélectionnées ne correspondent pas dans la base de référence.")
     else:
