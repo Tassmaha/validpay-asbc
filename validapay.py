@@ -336,5 +336,3 @@ if prompt := st.chat_input("Ex: Quel est le taux de rejet par district ?"):
     if 'df_pay' in locals() and 'Statut_ValidaPay' in df_pay.columns:
         total_a = len(df_pay)
         stats_a = df_pay['Statut_ValidaPay'].value_counts().to_dict()
-
-
