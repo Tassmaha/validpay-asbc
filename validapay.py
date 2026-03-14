@@ -275,7 +275,23 @@ if ref_file and pay_file:
                     chart_data = df_erreurs_graph.groupby(col_geo).size().reset_index(name='Nombre de rejets')
                     chart_data = chart_data.sort_values(by='Nombre de rejets', ascending=False)
                     st.bar_chart(data=chart_data, x=col_geo, y='Nombre de rejets', color="#FF4B4B")
-@@ -180,50 +260,60 @@ if ref_file and pay_file:
+                    st.bar_chart(chart_data.set_index(col_geo)['Nombre de rejets'])
+                    st.caption(f"Zones où les erreurs de saisie, les doublons ou les absences sont les plus élevés.")
+                else:
+                    st.success("Aucune erreur à afficher sur le graphique !")
+            
+           
+            # --- GÉNÉRATION DES EXPORTS ---
+            st.divider()
+            st.subheader("📥 Exportation des fichiers")
+            
+            # 1. Rapport Coloré
+            buffer_complet = io.BytesIO()
+            with pd.ExcelWriter(buffer_complet, engine='openpyxl') as writer:
+                df_export = df_pay.drop(columns=['CLE_UNIQUE'])
+                df_export.to_excel(writer, index=False, sheet_name='Validation')
+                worksheet = writer.sheets['Validation']
+                
                 vert_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
                 rouge_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
                 
