@@ -8,8 +8,15 @@ from PIL import Image
 from openpyxl.styles import PatternFill
 
 # Configuration de l'IA (Utilisez votre clé ici)
+# Configuration de l'IA
+# Recommandation: gemini-2.5-pro (meilleure qualité d'analyse).
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 model = genai.GenerativeModel('models/gemini-2.0-flash')
+MODEL_OPTIONS = {
+    "Gemini 2.5 Pro (recommandé)": "models/gemini-2.5-pro",
+    "Gemini 2.5 Flash (rapide)": "models/gemini-2.5-flash",
+    "Gemini 2.0 Flash (compatibilité)": "models/gemini-2.0-flash",
+}
 
 # Configuration de la page
 st.set_page_config(page_title="ValidaPay Pro", page_icon="🇧🇫", layout="wide")
@@ -39,6 +46,7 @@ st.markdown(
 )
 
 st.divider()
+
 
 def normaliser_texte(valeur):
     return " ".join(str(valeur).strip().upper().split())
@@ -337,8 +345,56 @@ if ref_file and pay_file:
 st.divider()
 st.header("🔬 Assistant IA")
 
+c_ia_1, c_ia_2 = st.columns([2, 1])
+with c_ia_1:
+    modele_selectionne = st.selectbox(
+        "Modèle IA",
+        list(MODEL_OPTIONS.keys()),
+        index=0,
+        help="Choisissez Gemini 2.5 Pro pour la meilleure qualité d'analyse, ou Flash pour plus de vitesse."
+    )
+with c_ia_2:
+    st.caption("🏆 Meilleur modèle recommandé: Gemini 2.5 Pro")
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+
+def construire_contexte_ia(dataframe):
+    if dataframe is None or 'Statut_ValidaPay' not in dataframe.columns:
+        return "L'analyse n'est pas encore lancée."
+
+    total_agents = len(dataframe)
+    stats_statut = dataframe['Statut_ValidaPay'].value_counts().to_dict()
+    taux_anomalies = (1 - (stats_statut.get('Valide', 0) / total_agents)) * 100 if total_agents > 0 else 0
+
+    col_geo_assistant = next(
+        (c for c in dataframe.columns if any(x in c.lower() for x in ['district', 'ds', 'région', 'province'])),
+        None
+    )
+
+    resume_geo = "Non disponible"
+    if col_geo_assistant:
+        erreurs_geo = dataframe[dataframe['Statut_ValidaPay'] != 'Valide']
+        if not erreurs_geo.empty:
+            top_geo = erreurs_geo[col_geo_assistant].value_counts().head(3).to_dict()
+            resume_geo = f"Top zones en anomalies ({col_geo_assistant}): {top_geo}"
+
+    return f"""
+    Tu es l'analyste expert de la Direction de la Santé Communautaire au Burkina Faso.
+    Réponds en français, de manière professionnelle et concise.
+    Donne systématiquement :
+    1) un constat chiffré,
+    2) une interprétation,
+    3) 2 recommandations opérationnelles.
+
+    DONNÉES:
+    - Total agents: {total_agents}
+    - Répartition statuts: {stats_statut}
+    - Taux anomalies: {taux_anomalies:.1f}%
+    - {resume_geo}
+    """
+
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -352,3 +408,28 @@ if prompt := st.chat_input("Ex: Quel est le taux de rejet par district ?"):
     if 'df_pay' in locals() and 'Statut_ValidaPay' in df_pay.columns:
         total_a = len(df_pay)
         stats_a = df_pay['Statut_ValidaPay'].value_counts().to_dict()
+        taux_e = (1 - (stats_a.get('Valide', 0) / total_a)) * 100 if total_a > 0 else 0
+        
+        contexte = f"""
+        Tu es l'analyste expert de la Direction de la Santé Communautaire au Burkina Faso.
+        DONNÉES : Total agents: {total_a}, Répartition: {stats_a}, Taux anomalies: {taux_e:.1f}%.
+        Réponds de façon professionnelle et donne une recommandation stratégique.
+        """
+    else:
+        contexte = "L'analyse n'est pas encore lancée."
+    contexte = construire_contexte_ia(df_pay if 'df_pay' in locals() else None)
+
+    with st.chat_message("assistant"):
+        try:
+            full_p = f"{contexte}\n\nQuestion : {prompt}"
+            response = model.generate_content(full_p)
+            st.markdown(response.text)
+            st.session_state.messages.append({"role": "assistant", "content": response.text})
+            modele_ia = genai.GenerativeModel(MODEL_OPTIONS[modele_selectionne])
+            full_prompt = f"{contexte}\n\nQuestion utilisateur: {prompt}"
+            response = modele_ia.generate_content(full_prompt)
+            texte_reponse = response.text if hasattr(response, "text") and response.text else "Je n'ai pas pu générer de réponse exploitable."
+            st.markdown(texte_reponse)
+            st.session_state.messages.append({"role": "assistant", "content": texte_reponse})
+        except Exception as e:
+            st.error(f"Erreur IA : {str(e)}")
