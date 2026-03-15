@@ -423,7 +423,7 @@ def reponse_assistant_local(dataframe, question):
             detail_geo = erreurs_geo[col_geo_assistant].value_counts().head(3).to_dict()
 
     return f"""
-**Analyse locale (sans appel API)**
+**Analyse locale (sans IA de gemini)**
 
 1) **Constat chiffré**
 - Total ASBC analysés: **{total_agents}**
@@ -437,7 +437,7 @@ La question posée était: _{question}_.
 Le niveau d'anomalies observé indique une priorité de correction sur les statuts les plus fréquents.
 Top zones en anomalies: **{detail_geo}**.
 
-3) **Recommandations opérationnelles**
+3) **Recommandations**
 - Corriger en priorité les statuts dominants puis relancer la validation.
 - Mettre en place un contrôle en amont sur la saisie téléphone et la qualité des identifiants.
 """
