@@ -5,15 +5,20 @@ These tests cover the pure functions and core validation pipeline
 extracted from validapay.py.
 """
 
-import math
+import io
 
+import openpyxl
 import pandas as pd
 import pytest
 
-# Import functions from the extracted module
 from validation import (
     construire_contexte_ia,
+    detecter_colonne_geo,
     executer_validation,
+    generer_corrections,
+    generer_journal_corrections,
+    generer_liste_valides,
+    generer_rapport_colore,
     nettoyer_telephone,
     normaliser_texte,
     reponse_assistant_local,
@@ -257,3 +262,197 @@ class TestReponseAssistantLocal:
         df = pd.DataFrame({"Statut_ValidaPay": ["Valide", "Valide"]})
         result = reponse_assistant_local(df, "analyse")
         assert "0.0%" in result
+
+    def test_geo_column_in_response(self):
+        df = pd.DataFrame({
+            "Statut_ValidaPay": ["Valide", "Absent"],
+            "District": ["D1", "D2"],
+        })
+        result = reponse_assistant_local(df, "analyse geo")
+        assert "D2" in result
+
+
+# ─── detecter_colonne_geo ───────────────────────────────────────────────────
+
+
+class TestDetecterColonneGeo:
+    def test_district_detected(self):
+        assert detecter_colonne_geo(["Nom", "District Sanitaire", "Tel"]) == "District Sanitaire"
+
+    def test_ds_detected(self):
+        assert detecter_colonne_geo(["Nom", "DS", "Tel"]) == "DS"
+
+    def test_region_detected(self):
+        assert detecter_colonne_geo(["Nom", "Région", "Tel"]) == "Région"
+
+    def test_province_detected(self):
+        assert detecter_colonne_geo(["Nom", "Province", "Tel"]) == "Province"
+
+    def test_case_insensitive(self):
+        assert detecter_colonne_geo(["nom", "DISTRICT", "tel"]) == "DISTRICT"
+
+    def test_no_match(self):
+        assert detecter_colonne_geo(["Nom", "Prénom", "Tel"]) is None
+
+    def test_empty_columns(self):
+        assert detecter_colonne_geo([]) is None
+
+    def test_first_match_returned(self):
+        result = detecter_colonne_geo(["Province", "District"])
+        assert result == "Province"
+
+
+# ─── generer_corrections ────────────────────────────────────────────────────
+
+
+class TestGenererCorrections:
+    def test_text_normalization_detected(self):
+        df = pd.DataFrame({"Nom": ["  jean  dupont  "], "CLE_UNIQUE": ["x"]})
+        preview, journal = generer_corrections(df, ["Nom"])
+        assert len(journal) == 1
+        assert journal[0]["Type correction"] == "Normalisation texte"
+        assert preview["Nom"].iloc[0] == "JEAN DUPONT"
+
+    def test_no_correction_needed(self):
+        df = pd.DataFrame({"Nom": ["JEAN"], "CLE_UNIQUE": ["x"]})
+        preview, journal = generer_corrections(df, ["Nom"])
+        assert len(journal) == 0
+
+    def test_phone_cleaning_detected(self):
+        df = pd.DataFrame({"Tel": ["70-12-34-56"], "CLE_UNIQUE": ["x"]})
+        preview, journal = generer_corrections(df, [], col_tel="Tel")
+        assert len(journal) == 1
+        assert journal[0]["Type correction"] == "Nettoyage téléphone"
+        assert preview["Tel"].iloc[0] == "70123456"
+
+    def test_phone_not_cleaned_if_result_not_8_digits(self):
+        """Phone with letters that produces <8 digits after cleaning should NOT be proposed."""
+        df = pd.DataFrame({"Tel": ["70aa55"], "CLE_UNIQUE": ["x"]})
+        preview, journal = generer_corrections(df, [], col_tel="Tel")
+        phone_corrections = [j for j in journal if j["Type correction"] == "Nettoyage téléphone"]
+        assert len(phone_corrections) == 0
+
+    def test_multiple_columns_corrected(self):
+        df = pd.DataFrame({
+            "Nom": ["  alice  "],
+            "Prenom": ["  bob  "],
+            "CLE_UNIQUE": ["x"],
+        })
+        preview, journal = generer_corrections(df, ["Nom", "Prenom"])
+        assert len(journal) == 2
+
+    def test_missing_column_skipped(self):
+        df = pd.DataFrame({"Nom": ["jean"], "CLE_UNIQUE": ["x"]})
+        preview, journal = generer_corrections(df, ["Nom", "ColInexistante"])
+        # Should not raise, just skip the missing column
+        assert isinstance(journal, list)
+
+    def test_journal_line_numbers(self):
+        """Line numbers should be index + 2 (accounting for Excel header row)."""
+        df = pd.DataFrame({"Nom": ["CLEAN", "  fix me  "], "CLE_UNIQUE": ["x", "y"]})
+        _, journal = generer_corrections(df, ["Nom"])
+        assert len(journal) == 1
+        assert journal[0]["Ligne"] == 3  # index 1 + 2
+
+
+# ─── generer_rapport_colore ─────────────────────────────────────────────────
+
+
+class TestGenererRapportColore:
+    def _make_df(self):
+        return pd.DataFrame({
+            "Nom": ["ALICE", "BOB"],
+            "Statut_ValidaPay": ["Valide", "Absent"],
+            "CLE_UNIQUE": ["ALICE", "BOB"],
+        })
+
+    def test_returns_valid_xlsx(self):
+        data = generer_rapport_colore(self._make_df())
+        wb = openpyxl.load_workbook(io.BytesIO(data))
+        ws = wb.active
+        assert ws.title == "Validation"
+
+    def test_cle_unique_excluded(self):
+        data = generer_rapport_colore(self._make_df())
+        wb = openpyxl.load_workbook(io.BytesIO(data))
+        ws = wb.active
+        headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+        assert "CLE_UNIQUE" not in headers
+
+    def test_valid_row_green_fill(self):
+        data = generer_rapport_colore(self._make_df())
+        wb = openpyxl.load_workbook(io.BytesIO(data))
+        ws = wb.active
+        # Row 2 is ALICE (Valide) → green
+        fill_color = ws.cell(row=2, column=1).fill.start_color.rgb
+        assert fill_color == "00C6EFCE"
+
+    def test_invalid_row_red_fill(self):
+        data = generer_rapport_colore(self._make_df())
+        wb = openpyxl.load_workbook(io.BytesIO(data))
+        ws = wb.active
+        # Row 3 is BOB (Absent) → red
+        fill_color = ws.cell(row=3, column=1).fill.start_color.rgb
+        assert fill_color == "00FFC7CE"
+
+
+# ─── generer_liste_valides ──────────────────────────────────────────────────
+
+
+class TestGenererListeValides:
+    def test_only_valid_rows(self):
+        df = pd.DataFrame({
+            "Nom": ["ALICE", "BOB", "CHARLIE"],
+            "Statut_ValidaPay": ["Valide", "Absent", "Valide"],
+            "CLE_UNIQUE": ["A", "B", "C"],
+        })
+        data = generer_liste_valides(df)
+        result = pd.read_excel(io.BytesIO(data))
+        assert len(result) == 2
+        assert set(result["Nom"]) == {"ALICE", "CHARLIE"}
+
+    def test_excludes_status_and_key_columns(self):
+        df = pd.DataFrame({
+            "Nom": ["ALICE"],
+            "Statut_ValidaPay": ["Valide"],
+            "CLE_UNIQUE": ["A"],
+        })
+        data = generer_liste_valides(df)
+        result = pd.read_excel(io.BytesIO(data))
+        assert "Statut_ValidaPay" not in result.columns
+        assert "CLE_UNIQUE" not in result.columns
+
+    def test_empty_when_all_rejected(self):
+        df = pd.DataFrame({
+            "Nom": ["BOB"],
+            "Statut_ValidaPay": ["Absent"],
+            "CLE_UNIQUE": ["B"],
+        })
+        data = generer_liste_valides(df)
+        result = pd.read_excel(io.BytesIO(data))
+        assert len(result) == 0
+
+
+# ─── generer_journal_corrections ────────────────────────────────────────────
+
+
+class TestGenererJournalCorrections:
+    def test_returns_none_for_empty(self):
+        assert generer_journal_corrections([]) is None
+
+    def test_returns_valid_xlsx(self):
+        journal = [{"Ligne": 2, "Colonne": "Nom", "Ancienne valeur": "jean", "Nouvelle valeur": "JEAN", "Type correction": "Normalisation texte"}]
+        data = generer_journal_corrections(journal)
+        assert data is not None
+        result = pd.read_excel(io.BytesIO(data), sheet_name="Journal corrections")
+        assert len(result) == 1
+        assert result["Colonne"].iloc[0] == "Nom"
+
+    def test_multiple_corrections(self):
+        journal = [
+            {"Ligne": 2, "Colonne": "Nom", "Ancienne valeur": "a", "Nouvelle valeur": "A", "Type correction": "Normalisation texte"},
+            {"Ligne": 3, "Colonne": "Tel", "Ancienne valeur": "70-00-00-00", "Nouvelle valeur": "70000000", "Type correction": "Nettoyage téléphone"},
+        ]
+        data = generer_journal_corrections(journal)
+        result = pd.read_excel(io.BytesIO(data), sheet_name="Journal corrections")
+        assert len(result) == 2

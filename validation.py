@@ -4,7 +4,10 @@ Core validation logic for ValidPay-ASBC.
 Extracted from validapay.py to enable unit testing without Streamlit dependencies.
 """
 
+import io
+
 import pandas as pd
+from openpyxl.styles import PatternFill
 
 
 def normaliser_texte(valeur):
@@ -172,3 +175,133 @@ Top zones en anomalies: **{detail_geo}**.
 - Corriger en priorité les statuts dominants puis relancer la validation.
 - Mettre en place un contrôle en amont sur la saisie téléphone et la qualité des identifiants.
 """
+
+
+def detecter_colonne_geo(columns):
+    """Detect a geographic column by keyword matching on column names.
+
+    Returns the first column name containing 'district', 'ds', 'région', or 'province'
+    (case-insensitive), or None if no match.
+    """
+    return next(
+        (c for c in columns if any(x in c.lower() for x in ["district", "ds", "région", "province"])),
+        None,
+    )
+
+
+def generer_corrections(df_pay, colonnes_texte, col_tel=None):
+    """Generate a preview DataFrame and a journal of proposed corrections.
+
+    Args:
+        df_pay: The payment DataFrame.
+        colonnes_texte: List of text columns to normalize.
+        col_tel: Phone column name, or None to skip phone cleaning.
+
+    Returns:
+        (df_preview, journal_corrections) where df_preview is the corrected copy
+        and journal_corrections is a list of dicts describing each correction.
+    """
+    df_preview = df_pay.copy()
+    journal_corrections = []
+
+    for col in colonnes_texte:
+        if col in df_preview.columns:
+            serie_avant = df_preview[col].astype(str)
+            serie_apres = serie_avant.apply(normaliser_texte)
+            mask_modif = serie_avant != serie_apres
+            if mask_modif.any():
+                df_preview.loc[mask_modif, col] = serie_apres[mask_modif]
+                for idx in df_preview.index[mask_modif]:
+                    journal_corrections.append({
+                        "Ligne": int(idx) + 2,
+                        "Colonne": col,
+                        "Ancienne valeur": serie_avant.loc[idx],
+                        "Nouvelle valeur": serie_apres.loc[idx],
+                        "Type correction": "Normalisation texte",
+                    })
+
+    if col_tel is not None and col_tel in df_preview.columns:
+        serie_tel_avant = df_preview[col_tel].astype(str)
+        serie_tel_nettoyee = serie_tel_avant.apply(nettoyer_telephone)
+        mask_tel = (
+            (serie_tel_avant != serie_tel_nettoyee)
+            & (serie_tel_nettoyee.str.len() == 8)
+            & (serie_tel_nettoyee.str.isdigit())
+        )
+        if mask_tel.any():
+            df_preview.loc[mask_tel, col_tel] = serie_tel_nettoyee[mask_tel]
+            for idx in df_preview.index[mask_tel]:
+                journal_corrections.append({
+                    "Ligne": int(idx) + 2,
+                    "Colonne": col_tel,
+                    "Ancienne valeur": serie_tel_avant.loc[idx],
+                    "Nouvelle valeur": serie_tel_nettoyee.loc[idx],
+                    "Type correction": "Nettoyage téléphone",
+                })
+
+    return df_preview, journal_corrections
+
+
+def generer_rapport_colore(df_pay):
+    """Generate a colored Excel report as bytes.
+
+    Valid rows get green fill, invalid rows get red fill.
+    The CLE_UNIQUE column is excluded from the export.
+
+    Returns:
+        bytes content of the .xlsx file.
+    """
+    buffer = io.BytesIO()
+    df_export = df_pay.drop(columns=["CLE_UNIQUE"], errors="ignore")
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_export.to_excel(writer, index=False, sheet_name="Validation")
+        worksheet = writer.sheets["Validation"]
+
+        vert_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+        rouge_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+        idx_statut = df_export.columns.get_loc("Statut_ValidaPay") + 1
+        nb_cols = len(df_export.columns)
+
+        for row_num in range(2, len(df_export) + 2):
+            cell_statut = worksheet.cell(row=row_num, column=idx_statut).value
+            val_statut = str(cell_statut).strip() if cell_statut else ""
+            fill = vert_fill if val_statut == "Valide" else rouge_fill
+            for col_num in range(1, nb_cols + 1):
+                worksheet.cell(row=row_num, column=col_num).fill = fill
+
+    return buffer.getvalue()
+
+
+def generer_liste_valides(df_pay):
+    """Generate an Excel file containing only valid ASBC entries.
+
+    Returns:
+        bytes content of the .xlsx file.
+    """
+    buffer = io.BytesIO()
+    df_valides = df_pay[df_pay["Statut_ValidaPay"] == "Valide"].drop(
+        columns=["CLE_UNIQUE", "Statut_ValidaPay"], errors="ignore"
+    )
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_valides.to_excel(writer, index=False)
+    return buffer.getvalue()
+
+
+def generer_journal_corrections(journal_corrections):
+    """Generate an Excel file for the correction journal.
+
+    Args:
+        journal_corrections: list of dicts with correction details.
+
+    Returns:
+        bytes content of the .xlsx file, or None if no corrections.
+    """
+    if not journal_corrections:
+        return None
+    buffer = io.BytesIO()
+    df_journal = pd.DataFrame(journal_corrections)
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_journal.to_excel(writer, index=False, sheet_name="Journal corrections")
+    return buffer.getvalue()
