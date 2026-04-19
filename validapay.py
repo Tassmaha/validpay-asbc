@@ -21,16 +21,21 @@ from validation import (
     charger_fichier,
 )
 
-# Configuration de l'IA
-# Recommandation: gemini-2.5-pro (meilleure qualité d'analyse).
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('models/gemini-2.0-flash')
+# Configuration de l'IA (optionnelle — l'Assistant local fonctionne sans clé)
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") if hasattr(st, "secrets") else None
+IA_DISPONIBLE = bool(GEMINI_API_KEY)
+if IA_DISPONIBLE:
+    genai.configure(api_key=GEMINI_API_KEY)
+
 MODEL_OPTIONS = {
     "Assistant local (sans quota API)": None,
-    "Gemini 2.5 Pro (recommandé)": "models/gemini-2.5-pro",
-    "Gemini 2.5 Flash (rapide)": "models/gemini-2.5-flash",
-    "Gemini 2.0 Flash (compatibilité)": "models/gemini-2.0-flash",
 }
+if IA_DISPONIBLE:
+    MODEL_OPTIONS.update({
+        "Gemini 2.5 Pro (recommandé)": "models/gemini-2.5-pro",
+        "Gemini 2.5 Flash (rapide)": "models/gemini-2.5-flash",
+        "Gemini 2.0 Flash (compatibilité)": "models/gemini-2.0-flash",
+    })
 
 # Configuration de la page
 st.set_page_config(page_title="ValidaPay Pro", page_icon="🇧🇫", layout="wide")
@@ -229,11 +234,14 @@ with c_ia_1:
     modele_selectionne = st.selectbox(
         "Modèle IA",
         list(MODEL_OPTIONS.keys()),
-        index=1,
+        index=1 if IA_DISPONIBLE else 0,
         help="Choisissez Gemini 2.5 Pro pour la meilleure qualité d'analyse, ou Flash pour plus de vitesse."
     )
 with c_ia_2:
-    st.caption("🏆 Meilleur modèle recommandé: Gemini 2.5 Pro | ✅ Alternative sans quota: Assistant local")
+    if IA_DISPONIBLE:
+        st.caption("🏆 Meilleur modèle recommandé: Gemini 2.5 Pro | ✅ Alternative sans quota: Assistant local")
+    else:
+        st.caption("ℹ️ Clé Gemini non configurée — seul l'Assistant local est disponible.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
