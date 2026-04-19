@@ -18,6 +18,7 @@ from validation import (
     generer_rapport_colore,
     generer_liste_valides,
     generer_journal_corrections,
+    charger_fichier,
 )
 
 # Configuration de l'IA
@@ -62,16 +63,23 @@ st.divider()
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("1. Base de référence (PGA)")
-    ref_file = st.file_uploader("Personnel de référence (Excel)", type=['xlsx'], key="ref")
+    ref_file = st.file_uploader("Personnel de référence (Excel ou CSV)", type=['xlsx', 'csv'], key="ref")
 
 with col2:
     st.subheader("2. Liste de paiement")
-    pay_file = st.file_uploader("Liste à valider (Excel)", type=['xlsx'], key="pay")
+    pay_file = st.file_uploader("Liste à valider (Excel ou CSV)", type=['xlsx', 'csv'], key="pay")
 
 if ref_file and pay_file:
-    df_ref = pd.read_excel(ref_file, engine='calamine').astype(str)
-    df_pay = pd.read_excel(pay_file, engine='calamine').astype(str)
-    st.success("Fichiers chargés avec succès !")
+    try:
+        df_ref = charger_fichier(ref_file)
+        df_pay = charger_fichier(pay_file)
+        st.success("Fichiers chargés avec succès !")
+    except ValueError as e:
+        st.error(f"Erreur de chargement : {e}")
+        st.stop()
+    except Exception as e:
+        st.error(f"Impossible de lire les fichiers : {e}")
+        st.stop()
 
     st.header("🔍 Configuration")
     colonnes_pay = df_pay.columns.tolist()

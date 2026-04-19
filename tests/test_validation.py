@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from validation import (
+    charger_fichier,
     construire_contexte_ia,
     detecter_colonne_geo,
     executer_validation,
@@ -456,3 +457,85 @@ class TestGenererJournalCorrections:
         data = generer_journal_corrections(journal)
         result = pd.read_excel(io.BytesIO(data), sheet_name="Journal corrections")
         assert len(result) == 2
+
+
+# ─── charger_fichier ────────────────────────────────────────────────────────
+
+
+def _fake_upload(content_bytes, name):
+    """Build a BytesIO with a .name attribute, mimicking Streamlit UploadedFile."""
+    buf = io.BytesIO(content_bytes)
+    buf.name = name
+    return buf
+
+
+class TestChargerFichier:
+    def test_csv_basic(self):
+        csv_content = b"Nom,Prenom,Tel\nJEAN,DUPONT,70123456\nMARIE,MARTIN,70000000\n"
+        uploaded = _fake_upload(csv_content, "data.csv")
+        df = charger_fichier(uploaded)
+        assert list(df.columns) == ["Nom", "Prenom", "Tel"]
+        assert len(df) == 2
+        assert df["Tel"].iloc[0] == "70123456"
+
+    def test_csv_all_values_are_strings(self):
+        """Numeric-looking values must remain strings so leading zeros are preserved."""
+        csv_content = b"Nom,Tel\nJEAN,07123456\n"
+        uploaded = _fake_upload(csv_content, "data.csv")
+        df = charger_fichier(uploaded)
+        assert isinstance(df["Tel"].iloc[0], str)
+        assert df["Tel"].iloc[0] == "07123456"
+
+    def test_csv_semicolon_separator(self):
+        """Auto-detect semicolon separator (common in French locales)."""
+        csv_content = b"Nom;Prenom;Tel\nJEAN;DUPONT;70123456\n"
+        uploaded = _fake_upload(csv_content, "data.csv")
+        df = charger_fichier(uploaded)
+        assert list(df.columns) == ["Nom", "Prenom", "Tel"]
+        assert df["Nom"].iloc[0] == "JEAN"
+
+    def test_csv_latin1_encoding(self):
+        """Fallback to latin-1 when UTF-8 fails."""
+        csv_content = "Nom,Prenom\nJEAN,DUPONTÉ\n".encode("latin-1")
+        uploaded = _fake_upload(csv_content, "data.csv")
+        df = charger_fichier(uploaded)
+        assert len(df) == 1
+        assert "DUPONT" in df["Prenom"].iloc[0]
+
+    def test_csv_nan_values_become_empty_strings(self):
+        csv_content = b"Nom,Tel\nJEAN,\nMARIE,70000000\n"
+        uploaded = _fake_upload(csv_content, "data.csv")
+        df = charger_fichier(uploaded)
+        assert df["Tel"].iloc[0] == ""
+
+    def test_xlsx_file(self, tmp_path):
+        xlsx_path = tmp_path / "data.xlsx"
+        pd.DataFrame({"Nom": ["JEAN"], "Tel": ["70123456"]}).to_excel(xlsx_path, index=False)
+        with open(xlsx_path, "rb") as f:
+            uploaded = _fake_upload(f.read(), "data.xlsx")
+        df = charger_fichier(uploaded)
+        assert list(df.columns) == ["Nom", "Tel"]
+        assert df["Nom"].iloc[0] == "JEAN"
+
+    def test_unsupported_extension_raises(self):
+        uploaded = _fake_upload(b"stuff", "data.txt")
+        with pytest.raises(ValueError, match="non supporté"):
+            charger_fichier(uploaded)
+
+    def test_no_extension_raises(self):
+        uploaded = _fake_upload(b"stuff", "data")
+        with pytest.raises(ValueError):
+            charger_fichier(uploaded)
+
+    def test_explicit_name_override(self):
+        """Can pass nom= when the file-like object has no .name attribute."""
+        csv_content = b"Nom,Tel\nJEAN,70123456\n"
+        buffer = io.BytesIO(csv_content)
+        df = charger_fichier(buffer, nom="data.csv")
+        assert df["Nom"].iloc[0] == "JEAN"
+
+    def test_case_insensitive_extension(self):
+        csv_content = b"Nom,Tel\nJEAN,70123456\n"
+        uploaded = _fake_upload(csv_content, "DATA.CSV")
+        df = charger_fichier(uploaded)
+        assert df["Nom"].iloc[0] == "JEAN"

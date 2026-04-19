@@ -177,6 +177,40 @@ Top zones en anomalies: **{detail_geo}**.
 """
 
 
+def charger_fichier(fichier, nom=None):
+    """Load an uploaded file (Excel .xlsx or CSV) into a string DataFrame.
+
+    Args:
+        fichier: file-like object (Streamlit UploadedFile) or path string.
+        nom: optional filename override used for extension detection
+             (required when fichier has no .name attribute).
+
+    Returns:
+        pd.DataFrame with all values cast to str.
+
+    Raises:
+        ValueError: if the file extension is not supported.
+    """
+    filename = nom if nom is not None else getattr(fichier, "name", "")
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+
+    if ext == "xlsx":
+        return pd.read_excel(fichier, engine="calamine").astype(str)
+    if ext == "csv":
+        # Try UTF-8 first; fall back to latin-1 for legacy encodings common in the region.
+        try:
+            if hasattr(fichier, "seek"):
+                fichier.seek(0)
+            df = pd.read_csv(fichier, sep=None, engine="python", dtype=str, encoding="utf-8")
+        except (UnicodeDecodeError, UnicodeError):
+            if hasattr(fichier, "seek"):
+                fichier.seek(0)
+            df = pd.read_csv(fichier, sep=None, engine="python", dtype=str, encoding="latin-1")
+        return df.fillna("").astype(str)
+
+    raise ValueError(f"Format de fichier non supporté: .{ext} (utilisez .xlsx ou .csv)")
+
+
 def detecter_colonne_geo(columns):
     """Detect a geographic column by keyword matching on column names.
 
