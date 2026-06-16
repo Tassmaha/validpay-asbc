@@ -107,11 +107,17 @@ if ref_file and pay_file:
         col_village = st.selectbox("Colonne Village :", ["Aucune"] + colonnes_pay)
 
     if cols_cles:
-        # Création de la clé unique
-        df_pay['CLE_UNIQUE'] = df_pay[cols_cles].astype(str).apply(lambda row: '-'.join(row), axis=1)
+        # Création de la clé unique (concaténation vectorisée, compatible pandas 2.x)
+        def construire_cle(df, cols):
+            cle = df[cols[0]].astype(str)
+            for col in cols[1:]:
+                cle = cle + '-' + df[col].astype(str)
+            return cle
+
+        df_pay['CLE_UNIQUE'] = construire_cle(df_pay, cols_cles)
 
         if all(c in df_ref.columns for c in cols_cles):
-            df_ref['CLE_UNIQUE'] = df_ref[cols_cles].astype(str).apply(lambda row: '-'.join(row), axis=1)
+            df_ref['CLE_UNIQUE'] = construire_cle(df_ref, cols_cles)
 
             # Paramètres de validation
             tel_col = col_tel if col_tel != "Aucune" else None
@@ -134,7 +140,7 @@ if ref_file and pay_file:
 
                 if st.button("✅ Appliquer les corrections recommandées"):
                     df_pay = df_preview.copy()
-                    df_pay['CLE_UNIQUE'] = df_pay[cols_cles].astype(str).apply(lambda row: '-'.join(row), axis=1)
+                    df_pay['CLE_UNIQUE'] = construire_cle(df_pay, cols_cles)
                     df_pay = executer_validation(df_pay, df_ref, col_tel=tel_col, cols_doublons=cols_doublons, col_village=village_col)
                     st.success("Corrections appliquées et validation recalculée.")
             else:
