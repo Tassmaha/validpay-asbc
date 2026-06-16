@@ -108,10 +108,10 @@ if ref_file and pay_file:
 
     if cols_cles:
         # Création de la clé unique
-        df_pay['CLE_UNIQUE'] = df_pay[cols_cles].agg('-'.join, axis=1)
+        df_pay['CLE_UNIQUE'] = df_pay[cols_cles].astype(str).agg('-'.join, axis=1)
 
         if all(c in df_ref.columns for c in cols_cles):
-            df_ref['CLE_UNIQUE'] = df_ref[cols_cles].agg('-'.join, axis=1)
+            df_ref['CLE_UNIQUE'] = df_ref[cols_cles].astype(str).agg('-'.join, axis=1)
 
             # Paramètres de validation
             tel_col = col_tel if col_tel != "Aucune" else None
@@ -134,7 +134,7 @@ if ref_file and pay_file:
 
                 if st.button("✅ Appliquer les corrections recommandées"):
                     df_pay = df_preview.copy()
-                    df_pay['CLE_UNIQUE'] = df_pay[cols_cles].agg('-'.join, axis=1)
+                    df_pay['CLE_UNIQUE'] = df_pay[cols_cles].astype(str).agg('-'.join, axis=1)
                     df_pay = executer_validation(df_pay, df_ref, col_tel=tel_col, cols_doublons=cols_doublons, col_village=village_col)
                     st.success("Corrections appliquées et validation recalculée.")
             else:
